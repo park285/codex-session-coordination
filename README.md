@@ -69,8 +69,6 @@ shellcheck sync-session-coordination-skill.sh scripts/*.sh
 git diff --check
 ```
 
-## 소스와 라이선스
+## 라이선스
 
-이 저장소는 `iris-stack`의 커밋 `700bad3d6037e92423122f332f7a7b8a2192e189`에 있던 `tools/codex/session-coordination/`과 두 `tools/checks/check-codex-session-coordination-skill*.sh` 검사를 분리한 초기 스냅샷입니다. Apache-2.0 [LICENSE](LICENSE)를 원본 그대로 보존합니다. 런타임 helper, 스킬과 설치 스크립트는 분리 과정에서 변경하지 않았습니다.
-
-도구의 소스와 검사는 이 저장소가 소유합니다. `iris-stack`에는 사용 참조와 적용 커밋만 남깁니다. npm 배포는 하지 않으므로 `package.json`의 `private: true`를 유지합니다.
+[Apache-2.0](LICENSE)
