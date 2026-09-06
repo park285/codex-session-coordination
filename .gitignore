@@ -1,1 +1,4 @@
 node_modules/
+
+# 구현 계획은 로컬에서만 관리합니다.
+/docs/plans/
