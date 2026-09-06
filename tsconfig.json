@@ -6,11 +6,15 @@
     "strict": true,
     "noImplicitAny": true,
     "strictNullChecks": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "target": "ES2024",
     "types": ["node"],
     "maxNodeModuleJsDepth": 0
   },
-  "include": ["session-coordination/scripts/sessionctl.mjs"]
+  "include": ["session-coordination/scripts/**/*.mjs", "tests/**/*.mjs"]
 }

@@ -49,25 +49,29 @@ node session-coordination/scripts/sessionctl.mjs send '<session-uuid-or-exact-na
 
 `queued`는 native queue 접수를 뜻하며 수신 세션이 읽거나 작업을 완료했다는 뜻이 아닙니다. `rejected`와 `outcome_unknown`은 구분해서 보존합니다. 결과가 불명확하면 실제 상태를 확인하기 전에는 재전송하지 않습니다. `idle`·`notLoaded` 역시 작업 완료를 증명하지 않습니다.
 
-`list`의 기본 개수는 25이며 1–100까지 지정할 수 있습니다. `CODEX_SESSION_COORDINATION_TIMEOUT_MS`는 요청 대기 시간을 밀리초로 지정하며 기본 5,000, 허용 범위 50–30,000입니다. 원격 Codex 호스트와 subagent 위임은 이 스킬의 범위에 포함되지 않습니다.
+`list`의 기본 개수는 25이며 1–100까지 지정할 수 있습니다. `CODEX_SESSION_COORDINATION_TIMEOUT_MS`는 요청 대기 시간을 밀리초로 지정하며 기본 5,000, 허용 범위 50–30,000입니다. 전송 시간이 초과하면 `outcome_unknown`을 반환합니다. 자식 프로세스가 종료하지 않으면 250ms의 유예 뒤 강제 종료하고 파이프를 정리합니다. 원격 Codex 호스트와 subagent 위임은 이 스킬의 범위에 포함되지 않습니다.
 
 ## 검증
 
-개발 검사에는 npm, ripgrep과 jq도 필요합니다.
+개발 검사에는 npm, ripgrep, jq, ShellCheck도 필요합니다.
 
 ```bash
 npm run check
+```
+
+`check`는 고정 의존성을 설치하고 전체 JS 모듈의 문법·타입, 셸 스크립트, 테스트와 설치 사본을 검사합니다. 타입 검사에는 `strict`, `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`와 미사용 코드 검사를 적용합니다. GitHub Actions도 같은 명령을 실행합니다.
+
+테스트만 실행하려면 다음 명령을 사용합니다. 가짜 프로세스와 Codex 응답으로 종료 처리, 메시지 전달, 오류, 새 설치와 기존 설치의 갱신을 확인하며 실제 메시지는 보내지 않습니다.
+
+```bash
 npm test
 ```
 
-`check`는 고정 의존성을 `npm ci --ignore-scripts`로 설치하고 Node 문법, strict TypeScript, bundle 구성과 설치 사본의 일치를 검사합니다. `test`는 가짜 Codex proxy와 queue로 프로토콜, 정확한 대상 선택, 메시지 원문·envelope, 거절·불명확 결과, timeout과 설치 drift를 검증합니다. 테스트는 실제 세션에 메시지를 보내지 않습니다.
+## 코드 구성
 
-셸 변경에는 다음 검사도 실행합니다.
+`sessionctl.mjs`는 명령과 세션 데이터를 처리합니다. `lib/app-server.mjs`는 WebSocket·JSON-RPC 통신, `lib/queue.mjs`는 메시지 전송을 담당합니다. 두 모듈은 `lib/process.mjs`의 진단 출력·종료 처리를 공유하며, 입력 검증과 오류 형식은 `lib/validation.mjs`에 있습니다.
 
-```bash
-shellcheck sync-session-coordination-skill.sh scripts/*.sh
-git diff --check
-```
+설치 파일 목록은 `skill-files.txt`에서 관리합니다. 모듈을 먼저 설치하고 CLI 진입점을 마지막에 교체합니다.
 
 ## 라이선스
 

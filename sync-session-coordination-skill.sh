@@ -25,11 +25,12 @@ case "${mode}" in
     ;;
 esac
 
-managed_paths=(
-  "SKILL.md"
-  "agents/openai.yaml"
-  "scripts/sessionctl.mjs"
-)
+# 모듈을 먼저 설치하고 마지막에 CLI 진입점을 교체해 기존 설치를 갱신합니다.
+mapfile -t managed_paths < "${script_dir}/skill-files.txt"
+if (( ${#managed_paths[@]} == 0 )); then
+  echo "sync-session-coordination-skill: skill file manifest is empty" >&2
+  exit 1
+fi
 target_dir="${target_root}/session-coordination"
 temporary_file=""
 

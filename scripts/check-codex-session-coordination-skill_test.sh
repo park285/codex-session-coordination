@@ -279,7 +279,7 @@ jq -e --arg target_id "${target_id}" '.session.threadId == $target_id and .sessi
   "${fixture_root}/status.json" >/dev/null || fail "exact-name status resolution failed"
 
 queue_capture="${fixture_root}/queue.json"
-# Keep shell syntax literal to verify that queue arguments are not evaluated.
+# 큐 인자가 셸에서 평가되지 않는지 확인하기 위해 셸 문법을 문자열 그대로 유지합니다.
 # shellcheck disable=SC2016
 message='literal $HOME $(touch should-not-run) ; `false`'
 FAKE_MODE=normal FAKE_QUEUE_CAPTURE="${queue_capture}" CODEX_THREAD_ID="${self_id}" \
@@ -339,9 +339,25 @@ if CODEX_SESSION_COORDINATION_SKILLS_ROOT="${install_root}" bash "${syncer}" --c
 fi
 CODEX_SESSION_COORDINATION_SKILLS_ROOT="${install_root}" bash "${syncer}" --apply >/dev/null
 CODEX_SESSION_COORDINATION_SKILLS_ROOT="${install_root}" bash "${syncer}" --check >/dev/null
+FAKE_MODE=normal CODEX_THREAD_ID="${self_id}" \
+  node "${install_root}/session-coordination/scripts/sessionctl.mjs" self >"${fixture_root}/installed.json"
+jq -e --arg self_id "${self_id}" '.session.threadId == $self_id' "${fixture_root}/installed.json" >/dev/null || \
+  fail "fresh installation did not execute with its imported modules"
 printf '\nfixture drift\n' >>"${install_root}/session-coordination/SKILL.md"
 if CODEX_SESSION_COORDINATION_SKILLS_ROOT="${install_root}" bash "${syncer}" --check >/dev/null 2>&1; then
   fail "fixture installation drift was not detected"
 fi
 
-echo "PASS: session coordination protocol, targeting, queue outcomes, failures, and sync drift"
+legacy_root="${fixture_root}/legacy-skills"
+mkdir -p "${legacy_root}/session-coordination/agents" "${legacy_root}/session-coordination/scripts"
+cp "${root_dir}/session-coordination/SKILL.md" "${legacy_root}/session-coordination/SKILL.md"
+cp "${root_dir}/session-coordination/agents/openai.yaml" "${legacy_root}/session-coordination/agents/openai.yaml"
+printf 'throw new Error("legacy entry was not replaced");\n' >"${legacy_root}/session-coordination/scripts/sessionctl.mjs"
+CODEX_SESSION_COORDINATION_SKILLS_ROOT="${legacy_root}" bash "${syncer}" --apply >/dev/null
+CODEX_SESSION_COORDINATION_SKILLS_ROOT="${legacy_root}" bash "${syncer}" --check >/dev/null
+FAKE_MODE=normal CODEX_THREAD_ID="${self_id}" \
+  node "${legacy_root}/session-coordination/scripts/sessionctl.mjs" self >"${fixture_root}/upgraded.json"
+jq -e --arg self_id "${self_id}" '.session.threadId == $self_id' "${fixture_root}/upgraded.json" >/dev/null || \
+  fail "three-file installation did not upgrade to the module bundle"
+
+echo "PASS: session coordination protocol, targeting, queue outcomes, failures, fresh install, upgrade, and sync drift"

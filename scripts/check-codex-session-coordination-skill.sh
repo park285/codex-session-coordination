@@ -5,11 +5,11 @@ bundle_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 skill_dir="${bundle_root}/session-coordination"
 syncer="${bundle_root}/sync-session-coordination-skill.sh"
 required_node_version="v24.20.0"
-managed_paths=(
-  "SKILL.md"
-  "agents/openai.yaml"
-  "scripts/sessionctl.mjs"
-)
+mapfile -t managed_paths < "${bundle_root}/skill-files.txt"
+if (( ${#managed_paths[@]} == 0 )); then
+  echo "check-codex-session-coordination-skill: skill file manifest is empty" >&2
+  exit 1
+fi
 toolchain_paths=(
   "package.json"
   "package-lock.json"
@@ -59,10 +59,15 @@ if ! rg -q '^  allow_implicit_invocation: true$' "${skill_dir}/agents/openai.yam
   exit 1
 fi
 
-node --check "${skill_dir}/scripts/sessionctl.mjs"
+for relative_path in "${managed_paths[@]}"; do
+  if [[ "${relative_path}" == *.mjs ]]; then
+    node --check "${skill_dir}/${relative_path}"
+  fi
+done
 npm --prefix "${bundle_root}" ci --ignore-scripts --no-audit --no-fund >/dev/null
 npm --prefix "${bundle_root}" run typecheck >/dev/null
-bash -n "${syncer}"
+shellcheck "${syncer}" "${bundle_root}"/scripts/*.sh "${bundle_root}"/scripts/ci/*.sh
+npm --prefix "${bundle_root}" test
 
 if [[ -n "${CODEX_SESSION_COORDINATION_SKILLS_ROOT:-}" ]]; then
   target_root="${CODEX_SESSION_COORDINATION_SKILLS_ROOT}"
