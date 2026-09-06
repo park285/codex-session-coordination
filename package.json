@@ -2,7 +2,7 @@
   "name": "codex-session-coordination",
   "private": true,
   "version": "0.1.1",
-  "description": "Inspect local Codex sessions and queue messages through the native App Server and CLI.",
+  "description": "Inspect local Codex sessions and send steering messages with queue fallback when steering is unavailable.",
   "license": "Apache-2.0",
   "type": "module",
   "engines": {

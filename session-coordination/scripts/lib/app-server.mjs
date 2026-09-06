@@ -337,25 +337,33 @@ export class AppServerClient {
       this.protocolFailure("app-server emitted a response with an unknown request id");
       return;
     }
-    this.pending.delete(message.id);
-    clearTimeout(pending.timer);
-    if (message.error !== undefined) {
-      const rpcMessage = isObject(message.error) && typeof message.error.message === "string"
-        ? message.error.message
-        : "unknown app-server error";
-      const rpcCode = isObject(message.error) ? message.error.code : undefined;
+    // 모순되거나 손상된 응답을 확정 거절로 오인하면 전송 폴백이 중복 메시지를 만들 수 있습니다.
+    if (("error" in message) === ("result" in message)) {
+      this.protocolFailure("app-server response must contain exactly one of result or error");
+      return;
+    }
+    if ("error" in message) {
+      if (
+        !isObject(message.error) ||
+        typeof message.error.code !== "number" ||
+        !Number.isSafeInteger(message.error.code) ||
+        typeof message.error.message !== "string"
+      ) {
+        this.protocolFailure("app-server emitted a malformed RPC error");
+        return;
+      }
+      this.pending.delete(message.id);
+      clearTimeout(pending.timer);
       pending.reject(
-        new SessionCtlError("app_server_request_failed", rpcMessage, {
+        new SessionCtlError("app_server_request_failed", message.error.message, {
           method: pending.method,
-          rpcCode: rpcCode ?? null,
+          rpcCode: message.error.code,
         }),
       );
       return;
     }
-    if (!("result" in message)) {
-      pending.reject(new SessionCtlError("app_server_protocol_error", "app-server response has no result"));
-      return;
-    }
+    this.pending.delete(message.id);
+    clearTimeout(pending.timer);
     pending.resolve(message.result);
   }
 

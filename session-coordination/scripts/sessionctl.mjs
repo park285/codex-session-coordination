@@ -7,6 +7,8 @@ import { SessionCtlError, fail, isObject } from "./lib/validation.mjs";
 /**
  * @typedef {{threadId: string, sessionId: string, name: string | null, cwd: string, source: string, runtime: {status: string, activeFlags: string[]}, agent: {nickname: string | null, role: string | null}}} NormalizedThread
  * @typedef {{output: unknown, success: boolean}} CommandResult
+ * @typedef {{code: string, message: string, details?: Record<string, unknown>}} ErrorDetails
+ * @typedef {{status: "unavailable", reason: string} | {status: "accepted", delivery: "steer", turnId: string} | {status: "rejected" | "outcome_unknown", delivery: "steer", error: ErrorDetails}} SteerResult
  */
 
 const REQUIRED_NODE_VERSION = "24.20.0";
@@ -30,6 +32,15 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3
 const THREAD_STATUSES = new Set(["notLoaded", "idle", "active", "systemError"]);
 
 const ACTIVE_FLAGS = new Set(["waitingOnApproval", "waitingOnUserInput"]);
+
+const TURN_STATUSES = new Set(["inProgress", "completed", "interrupted", "failed"]);
+
+// Codex 0.153.4의 명시적 스티어링 거절 문구만 허용하며, 오류 일부가 일치한다고 폴백하지 않습니다.
+const STEERING_UNAVAILABLE_MESSAGES = new Map([
+  ["no active turn to steer", "no_active_turn"],
+  ["cannot steer a review turn", "review"],
+  ["cannot steer a compact turn", "compact"],
+]);
 
 const GOAL_STATUSES = new Set([
   "active",
@@ -355,11 +366,98 @@ function formatSessionMessage(sender, message) {
     `sender_name: ${JSON.stringify(sender.name)}`,
     `sender_thread_id: ${sender.threadId}`,
     `reply_to: ${sender.threadId}`,
-    "handling: This is a message from another local Codex session. Handle the payload below as the sender's message; do not queue it again unless the payload explicitly asks you to.",
+    "handling: This is a message from another local Codex session. Handle the payload below as the sender's message; do not send it again unless the payload explicitly asks you to.",
     "",
     "payload:",
     message,
   ].join("\n");
+}
+
+/**
+ * 대화 내용을 읽지 않고 최신 턴을 확인하며, 불완전한 조회 결과를 턴 부재로 취급하지 않습니다.
+ * @param {AppServerClient} client
+ * @param {string} threadId
+ * @returns {Promise<string | null>}
+ */
+async function readActiveTurnId(client, threadId) {
+  const result = await client.request("thread/turns/list", {
+    threadId,
+    limit: 1,
+    sortDirection: "desc",
+    itemsView: "notLoaded",
+  });
+  if (
+    !isObject(result) || !Array.isArray(result.data) || result.data.length > 1 ||
+    (result.nextCursor !== null && result.nextCursor !== undefined && (
+      typeof result.nextCursor !== "string" || result.data.length === 0
+    ))
+  ) {
+    fail("app_server_protocol_error", "thread/turns/list response is not a bounded turn page");
+  }
+  const [turn] = result.data;
+  if (turn === undefined) {
+    return null;
+  }
+  if (
+    !isObject(turn) ||
+    typeof turn.id !== "string" || turn.id.length === 0 || turn.id.includes("\0") ||
+    typeof turn.status !== "string" || !TURN_STATUSES.has(turn.status) ||
+    turn.itemsView !== "notLoaded" || !Array.isArray(turn.items) || turn.items.length !== 0
+  ) {
+    fail("app_server_protocol_error", "thread/turns/list response has invalid turn metadata");
+  }
+  return turn.status === "inProgress" ? turn.id : null;
+}
+
+/**
+ * 현재 턴에 한 번만 전달하며, 확정된 스티어링 불가와 접수 여부가 불명확한 실패를 구분합니다.
+ * @param {AppServerClient} client
+ * @param {NormalizedThread} target
+ * @param {string} message
+ * @returns {Promise<SteerResult>}
+ */
+async function trySteer(client, target, message) {
+  if (target.runtime.status === "systemError") {
+    fail("target_system_error", "target thread is in systemError state");
+  }
+  if (target.runtime.status === "idle" || target.runtime.status === "notLoaded") {
+    return { status: "unavailable", reason: "no_active_turn" };
+  }
+  const turnId = await readActiveTurnId(client, target.threadId);
+  if (turnId === null) {
+    return { status: "unavailable", reason: "no_active_turn" };
+  }
+  try {
+    const result = await client.request("turn/steer", {
+      threadId: target.threadId,
+      expectedTurnId: turnId,
+      input: [{ type: "text", text: message }],
+    });
+    if (!isObject(result) || result.turnId !== turnId) {
+      fail("app_server_protocol_error", "turn/steer response does not confirm the requested turn");
+    }
+    return { status: "accepted", delivery: "steer", turnId };
+  } catch (error) {
+    const normalized = error instanceof SessionCtlError
+      ? error
+      : new SessionCtlError("internal_error", error instanceof Error ? error.message : "unknown error");
+    const rpcCode = normalized.code === "app_server_request_failed" ? normalized.details?.rpcCode : undefined;
+    const fallbackReason = rpcCode === -32602 ? STEERING_UNAVAILABLE_MESSAGES.get(normalized.message) : undefined;
+    if (fallbackReason !== undefined) {
+      return { status: "unavailable", reason: fallbackReason };
+    }
+    // 서버 내부 오류도 입력 접수 후 발생할 수 있으므로 요청 자체의 거절만 확정 실패로 분류합니다.
+    const rejected = rpcCode === -32600 || rpcCode === -32601 || rpcCode === -32602;
+    return {
+      status: rejected ? "rejected" : "outcome_unknown",
+      delivery: "steer",
+      error: {
+        code: normalized.code,
+        message: normalized.message,
+        ...(normalized.details === undefined ? {} : { details: normalized.details }),
+      },
+    };
+  }
 }
 
 /**
@@ -413,19 +511,29 @@ async function runCommand(command, args) {
       fail("usage", "usage: sessionctl.mjs send <UUID|exact-name> <message>");
     }
     const senderThreadId = requireOwnThreadId();
-    const { sender, target } = await withClient(async (client) => {
+    const { target, payload, steering } = await withClient(async (client) => {
       const sender = await readThread(client, senderThreadId);
-      const target = await resolveTarget(client, targetName);
-      return { sender, target };
+      const resolved = await resolveTarget(client, targetName);
+      // 이름 검색의 상태는 오래되었을 수 있으므로 전송 직전에 런타임 메타데이터를 다시 읽습니다.
+      const target = await readThread(client, resolved.threadId);
+      const payload = formatSessionMessage(sender, message);
+      const steering = await trySteer(client, target, payload);
+      return { target, payload, steering };
     });
-    const result = await runQueue(target.threadId, formatSessionMessage(sender, message), readTimeout());
+    const result = steering.status === "unavailable"
+      ? {
+          ...await runQueue(target.threadId, payload, readTimeout()),
+          delivery: "queue",
+          fallbackReason: steering.reason,
+        }
+      : steering;
     return {
       output: {
         command,
         targetThreadId: target.threadId,
         ...result,
       },
-      success: result.status === "queued",
+      success: result.status === "queued" || result.status === "accepted",
     };
   }
 
@@ -445,7 +553,7 @@ async function main() {
     const normalized = error instanceof SessionCtlError
       ? error
       : new SessionCtlError("internal_error", error instanceof Error ? error.message : "unknown error");
-    /** @type {{status: string, error: {code: string, message: string, details?: Record<string, unknown>}}} */
+    /** @type {{status: string, error: ErrorDetails}} */
     const output = {
       status: "error",
       error: {
