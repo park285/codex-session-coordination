@@ -49,7 +49,7 @@ node session-coordination/scripts/sessionctl.mjs send '<session-uuid-or-exact-na
 
 `queued`는 native queue 접수를 뜻하며 수신 세션이 읽거나 작업을 완료했다는 뜻이 아닙니다. `rejected`와 `outcome_unknown`은 구분해서 보존합니다. 결과가 불명확하면 실제 상태를 확인하기 전에는 재전송하지 않습니다. `idle`·`notLoaded` 역시 작업 완료를 증명하지 않습니다.
 
-`list`의 기본 개수는 25이며 1~100까지 지정할 수 있습니다. `CODEX_SESSION_COORDINATION_TIMEOUT_MS`는 요청 대기 시간을 밀리초로 지정하며 기본 5,000, 허용 범위 50~30,000입니다. 원격 Codex 호스트와 subagent 위임은 이 스킬의 범위에 포함되지 않습니다.
+`list`의 기본 개수는 25이며 1–100까지 지정할 수 있습니다. `CODEX_SESSION_COORDINATION_TIMEOUT_MS`는 요청 대기 시간을 밀리초로 지정하며 기본 5,000, 허용 범위 50–30,000입니다. 원격 Codex 호스트와 subagent 위임은 이 스킬의 범위에 포함되지 않습니다.
 
 ## 검증
 
