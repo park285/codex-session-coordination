@@ -1,0 +1,20 @@
+{
+  "name": "codex-session-coordination",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Inspect local Codex sessions and queue messages through the native App Server and CLI.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "engines": {
+    "node": "24.20.0"
+  },
+  "scripts": {
+    "check": "bash scripts/check-codex-session-coordination-skill.sh",
+    "test": "bash scripts/check-codex-session-coordination-skill_test.sh",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "devDependencies": {
+    "@types/node": "24.13.3",
+    "typescript": "7.0.2"
+  }
+}
